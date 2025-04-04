@@ -1,33 +1,17 @@
+import re
+import json
+import urllib3
+import requests
 from tkinter import *
 from time import sleep
+from time import strftime
 from threading import Thread
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service
-from webdriver_manager.chrome import ChromeDriverManager
 
+urllib3.disable_warnings()
+
+agentStateDict = {1: "Logged Off", 2: "Ready", 3: "Not Ready"}
+callStateDict = {-1: "Logged Off", 1: "Idle", 2: "Alerting", 3: "Talking", 5: "Clerical"}
 stop_thread = False
-chrome_options = Options()
-chrome_options.add_argument("--headless=new") # No window
-chrome_options.add_experimental_option('excludeSwitches', ['enable-logging'])  # shut your up
-service = Service(ChromeDriverManager().install())
-
-def insecureClick():
-    try:
-        avansertButton = driver.find_element(By.XPATH, r"/html/body/div/div[2]/button[3]")
-        avansertButton.click()
-
-        proceedButton = driver.find_element(By.XPATH, r"/html/body/div/div[3]/p[2]/a")
-        proceedButton.click()
-    except:
-        pass
-    
-
-driver = webdriver.Chrome(service=service, options=chrome_options)
-
-driver.get("#removed#")
-insecureClick()
 
 root = Tk()
 root.title("AgentStatus :)")
@@ -53,40 +37,37 @@ busyAgentsLabel.place(x=175, y=270)
 nameTitle.place(x=10, y=10)
 agentStateTitle.place(x=190, y=10)
 callStateTitle.place(x=300, y=10)
-
-
-def updateStatus():
-    driver.get("#removed#")
-    sleep(0.5)
-    insecureClick()
-    agents = {}
-    for i in range(100): # magine 100 ansatte på ITB
-        try:
-            agentName = driver.find_element(By.XPATH, f"/html/body/div/div/div/div/div/div/table/tbody/tr[{i+1}]/td[1]/span").get_attribute("innerText").split(",")
-            agentState = driver.find_element(By.XPATH, f"/html/body/div/div/div/div/div/div/table/tbody/tr[{i+1}]/td[2]/span").get_attribute("innerText")
-            callState = driver.find_element(By.XPATH, f"/html/body/div/div/div/div/div/div/table/tbody/tr[{i+1}]/td[3]/span").get_attribute("innerText")
-            
-            fullName = f"{agentName[1]} {agentName[0]}"
-            agents[i] = {"Name": fullName, "Agentstate": agentState, "Callstate": callState}
-        except:
-            return agents
         
 
-def updateQueue():
-    driver.get("#removed#")
-    sleep(0.5)
-    insecureClick()
-    callsInQueue = driver.find_element(By.XPATH, r"/html/body/div/div/div/div/div/div/table/tbody/tr[2]/td[2]").get_attribute("innerText")
-    longestWaitingTime = driver.find_element(By.XPATH, r"/html/body/div/div/div/div/div/div/table/tbody/tr[2]/td[3]").get_attribute("innerText")
-    callsToday = driver.find_element(By.XPATH, r"/html/body/div/div/div/div/div/div/table/tbody/tr[2]/td[4]").get_attribute("innerText")
-    serviceLevel = driver.find_element(By.XPATH, r"/html/body/div/div/div/div/div/div/table/tbody/tr[2]/td[5]").get_attribute("innerText")
-    freeAgents = driver.find_element(By.XPATH, r"/html/body/div/div/div/div/div/div/table/tbody/tr[2]/td[6]").get_attribute("innerText")
-    busyAgents = driver.find_element(By.XPATH, r"/html/body/div/div/div/div/div/div/table/tbody/tr[2]/td[7]").get_attribute("innerText")
+def getQueue():
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36", 
+            "Referer": "__Removed__",
+            "Accept": "application/json;charset=utf-8"}
+
+    r = requests.get("__Removed__", headers=headers, verify=False)
+
+    return json.loads(json.dumps(r.json()[0]["Data"][1]))
+
+
+def getAgentInfo():
     
-    info = {"Calls in queue": callsInQueue, "Longest waiting time": longestWaitingTime, "Calls today": callsToday,
-            "Service level": serviceLevel, "Free agents": freeAgents, "Busy agents": busyAgents}
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36", 
+            "Referer": "__Removed__",
+            "Accept": "application/json;charset=utf-8"}
+    r = requests.get("__Removed__", headers=headers, verify=False)
+
+    agentInfo = json.loads(json.dumps(r.json()[0]["Data"]))
     
-    return info
+    #Format info
+    for i in range(len(agentInfo)):
+        name = agentInfo[i]["Agent Name"].split(",")
+        fullName = f"{name[1].lstrip()} {name[0]}"
+        
+        agentInfo[i]["Agent Name"] = fullName
+        agentInfo[i]["Agent state"] = agentStateDict[agentInfo[i]["Agent state"]]
+        agentInfo[i]["Call state"] = callStateDict[agentInfo[i]["Call state"]]
+    
+    return agentInfo
 
 
 def on_closing():
@@ -94,30 +75,28 @@ def on_closing():
     stop_thread = True
     thread.join()
     root.destroy()
-    driver.close()
     quit()
 
 
-def updateUI():
+def updateUI():   
     while stop_thread == False: 
         textColor = {"Logged Off": "Red", "Idle": "Green", "Talking": "Yellow", "Ready": "Green", "Not Ready": "Orange", "Outgoing": "Orange", "Clerical": "Pink", "Alerting": "Yellow"}
-        replaceBadState = {"Invalid (Idle)":"Idle", "Invalid (Ready)": "Ready", "Invalid (Talking)": "Talking", "Invalid (Logged Off)": "Logged Off"}
-        agents = updateStatus()
-        queue = updateQueue()
+        agents = getAgentInfo()
+        queue = getQueue()
         ypos = 30
         for agent in agents:
-            callState = agents[agent]["Callstate"]
-            agentState = agents[agent]["Agentstate"]
+            # Create ID to give unique name to labels
+            agentID_setup = re.findall("[A-Z]+", agent["Agent Name"])
+            agent_ID = ""
             
-            if agentState in replaceBadState.keys():
-                agentState = replaceBadState[agentState]
-            
-            if callState in replaceBadState.keys():
-                callState = replaceBadState[callState]
+            for char in agentID_setup:
+                agent_ID += char
 
-            nameLabel = Label(root,name=f"{agent}1", text=agents[agent]["Name"], font="Verdana 9",foreground="snow", background="gray26")
-            agentStateLabel = Label(root, name=f"{agent}2", text=agentState, font="Verdana 9",foreground="snow", background="gray26")
-            callStateLabel = Label(root,name=f"{agent}3", text=callState, font="Verdana 9",foreground="snow", background="gray26")
+            callState = agent["Call state"]
+            agentState = agent["Agent state"]
+            nameLabel = Label(root,name=f"{agent_ID.lower()}1", text=str(agent["Agent Name"]), font="Verdana 9",foreground="snow", background="gray26")
+            agentStateLabel = Label(root, name=f"{agent_ID.lower()}2", text=str(agentState), font="Verdana 9",foreground="snow", background="gray26")
+            callStateLabel = Label(root,name=f"{agent_ID.lower()}3", text=str(callState), font="Verdana 9",foreground="snow", background="gray26")
 
             agentStateLabel.configure(fg=textColor[agentState])
             callStateLabel.configure(fg=textColor[callState])
@@ -131,7 +110,7 @@ def updateUI():
         callsInQueue = Label(root, name="callsInQueue", text=queue["Calls in queue"], font="Verdana 10 bold", foreground="snow", background="gray26")
         longestWaitingTime = Label(root, name="longestWaitingTime", text=queue["Longest waiting time"], font="Verdana 10 bold", foreground="snow", background="gray26")
         callsToday = Label(root, name="callsToday", text=queue["Calls today"], font="Verdana 10 bold", foreground="snow", background="gray26")
-        serviceLevel = Label(root, name="serviceLevel", text=queue["Service level"], font="Verdana 10 bold", foreground="snow", background="gray26")
+        serviceLevel = Label(root, name="serviceLevel", text=f"{queue['Service level']}%", font="Verdana 10 bold", foreground="snow", background="gray26")
         freeAgents = Label(root, name="freeAgents", text=queue["Free agents"], font="Verdana 10 bold", foreground="snow", background="gray26")
         busyAgents = Label(root, name="busyAgents", text=queue["Busy agents"], font="Verdana 10 bold", foreground="snow", background="gray26")
 
@@ -145,9 +124,13 @@ def updateUI():
         nameTitle.place(x=10, y=10)
         agentStateTitle.place(x=190, y=10)
         callStateTitle.place(x=300, y=10)
+
+        root.title(f'AgentStatus :) - {strftime("%H:%M:%S")}')
         sleep (10)
 
-thread = Thread(target=updateUI)
+
+thread = Thread(target=updateUI, daemon=False)
 thread.start()
+
 root.protocol("WM_DELETE_WINDOW", on_closing)
 root.mainloop()
